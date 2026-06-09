@@ -1,0 +1,4 @@
+-- Local dev seed (runs on `supabase db reset`).
+-- The 3 default prompts and the default_credit_limit setting are seeded
+-- inside migration 0001_init.sql (so they also apply on `supabase db push`
+-- to a cloud project). Add any local-only demo data below.
