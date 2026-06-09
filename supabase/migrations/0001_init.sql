@@ -1,16 +1,30 @@
 -- ============================================================================
--- CreativeFlow AI — initial schema
+-- CreativeFlow AI — initial schema  (safe to re-run)
 -- Maps the OS Framework system-of-record onto Postgres:
---   profiles      -> Users / Team Members
---   prompts       -> Settings (per-function AI system prompt)
+--   profiles       -> Users / Team Members
+--   prompts        -> Settings (per-function AI system prompt)
 --   prompt_versions-> prompt history
---   sessions      -> Core Records (a campaign)
---   generations   -> Generation log / audit trail (one row per function run)
---   settings      -> global config (active provider/model, thresholds)
+--   sessions       -> Core Records (a campaign)
+--   generations    -> Generation log / audit trail (one row per function run)
+--   settings       -> global config (active provider/model, thresholds)
 -- ============================================================================
 
+-- ── profiles ────────────────────────────────────────────────────────────────
+create table if not exists public.profiles (
+  id           uuid primary key references auth.users(id) on delete cascade,
+  name         text,
+  email        text,
+  role         text not null default 'user' check (role in ('admin','user')),
+  credit_limit integer,                 -- NULL = unlimited
+  credits_used integer not null default 0,
+  status       text not null default 'active' check (status in ('active','invited','disabled')),
+  created_at   timestamptz not null default now()
+);
+alter table public.profiles enable row level security;
+
 -- ── Helper: is the current user an admin? ───────────────────────────────────
--- SECURITY DEFINER so policies can call it without recursing through profiles RLS.
+-- Defined AFTER profiles exists. SECURITY DEFINER so policies can call it
+-- without recursing through profiles RLS.
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -24,24 +38,12 @@ as $$
   );
 $$;
 
--- ── profiles ────────────────────────────────────────────────────────────────
-create table if not exists public.profiles (
-  id           uuid primary key references auth.users(id) on delete cascade,
-  name         text,
-  email        text,
-  role         text not null default 'user' check (role in ('admin','user')),
-  credit_limit integer,                 -- NULL = unlimited
-  credits_used integer not null default 0,
-  status       text not null default 'active' check (status in ('active','invited','disabled')),
-  created_at   timestamptz not null default now()
-);
-
-alter table public.profiles enable row level security;
-
+drop policy if exists "profiles: self or admin can read" on public.profiles;
 create policy "profiles: self or admin can read"
   on public.profiles for select
   using (id = auth.uid() or public.is_admin());
 
+drop policy if exists "profiles: admin can update" on public.profiles;
 create policy "profiles: admin can update"
   on public.profiles for update
   using (public.is_admin())
@@ -56,7 +58,7 @@ security definer
 set search_path = public
 as $$
 declare
-  is_first  boolean;
+  is_first   boolean;
   dflt_limit integer;
 begin
   select count(*) = 0 into is_first from public.profiles;
@@ -100,13 +102,14 @@ create table if not exists public.prompts (
   updated_at    timestamptz not null default now(),
   created_at    timestamptz not null default now()
 );
-
 alter table public.prompts enable row level security;
 
+drop policy if exists "prompts: authenticated can read" on public.prompts;
 create policy "prompts: authenticated can read"
   on public.prompts for select
   using (auth.uid() is not null);
 
+drop policy if exists "prompts: admin can write" on public.prompts;
 create policy "prompts: admin can write"
   on public.prompts for all
   using (public.is_admin())
@@ -122,13 +125,14 @@ create table if not exists public.prompt_versions (
   created_by    uuid references auth.users(id),
   created_at    timestamptz not null default now()
 );
-
 alter table public.prompt_versions enable row level security;
 
+drop policy if exists "prompt_versions: admin can read" on public.prompt_versions;
 create policy "prompt_versions: admin can read"
   on public.prompt_versions for select
   using (public.is_admin());
 
+drop policy if exists "prompt_versions: admin can insert" on public.prompt_versions;
 create policy "prompt_versions: admin can insert"
   on public.prompt_versions for insert
   with check (public.is_admin());
@@ -149,24 +153,26 @@ create table if not exists public.sessions (
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
 );
-
 create index if not exists sessions_user_idx on public.sessions(user_id, updated_at desc);
-
 alter table public.sessions enable row level security;
 
+drop policy if exists "sessions: owner or admin can read" on public.sessions;
 create policy "sessions: owner or admin can read"
   on public.sessions for select
   using (user_id = auth.uid() or public.is_admin());
 
+drop policy if exists "sessions: owner can insert" on public.sessions;
 create policy "sessions: owner can insert"
   on public.sessions for insert
   with check (user_id = auth.uid());
 
+drop policy if exists "sessions: owner can update" on public.sessions;
 create policy "sessions: owner can update"
   on public.sessions for update
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "sessions: owner can delete" on public.sessions;
 create policy "sessions: owner can delete"
   on public.sessions for delete
   using (user_id = auth.uid());
@@ -185,16 +191,16 @@ create table if not exists public.generations (
   output_tokens integer not null default 0,
   created_at    timestamptz not null default now()
 );
-
 create index if not exists generations_user_idx on public.generations(user_id, created_at desc);
 create index if not exists generations_session_idx on public.generations(session_id, created_at desc);
-
 alter table public.generations enable row level security;
 
+drop policy if exists "generations: owner or admin can read" on public.generations;
 create policy "generations: owner or admin can read"
   on public.generations for select
   using (user_id = auth.uid() or public.is_admin());
 
+drop policy if exists "generations: owner can insert" on public.generations;
 create policy "generations: owner can insert"
   on public.generations for insert
   with check (user_id = auth.uid());
@@ -206,20 +212,20 @@ create table if not exists public.settings (
   updated_by uuid references auth.users(id),
   updated_at timestamptz not null default now()
 );
-
 alter table public.settings enable row level security;
 
+drop policy if exists "settings: authenticated can read" on public.settings;
 create policy "settings: authenticated can read"
   on public.settings for select
   using (auth.uid() is not null);
 
+drop policy if exists "settings: admin can write" on public.settings;
 create policy "settings: admin can write"
   on public.settings for all
   using (public.is_admin())
   with check (public.is_admin());
 
 -- ── Seed the 3 default prompts (verbatim from the design mockup) ────────────
--- Idempotent: on conflict do nothing, so re-running migrations is safe.
 insert into public.prompts (function_key, name, system_prompt, version) values
 (
   'fn1', 'Creative angle generator',
