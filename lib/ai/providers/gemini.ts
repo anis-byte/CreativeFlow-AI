@@ -1,27 +1,35 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import type { Provider } from "@/lib/ai/types";
 
-// Google Gemini — free tier. JSON mode forces well-formed JSON output.
+// Google Gemini — free tier, via the unified @google/genai SDK.
+// JSON mode (responseMimeType) forces well-formed JSON output.
+// Default model is the `gemini-flash-latest` alias so it auto-tracks the
+// current Flash release (pinned versions get retired). If the free tier rejects
+// it, set AI_MODEL=gemini-flash-lite-latest.
 export const geminiProvider: Provider = {
   id: "gemini",
-  defaultModel: "gemini-2.0-flash",
+  defaultModel: "gemini-flash-latest",
 
   isConfigured() {
     return !!process.env.GEMINI_API_KEY;
   },
 
   async generate({ systemPrompt, userPrompt, model }) {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
     const modelId = model || process.env.AI_MODEL || this.defaultModel;
-    const m = genAI.getGenerativeModel({
+
+    const response = await ai.models.generateContent({
       model: modelId,
-      systemInstruction: systemPrompt,
-      generationConfig: { responseMimeType: "application/json" },
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+      },
     });
-    const res = await m.generateContent(userPrompt);
-    const usage = res.response.usageMetadata;
+
+    const usage = response.usageMetadata;
     return {
-      text: res.response.text(),
+      text: response.text ?? "",
       model: modelId,
       inputTokens: usage?.promptTokenCount ?? 0,
       outputTokens: usage?.candidatesTokenCount ?? 0,
