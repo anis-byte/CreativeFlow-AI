@@ -43,12 +43,15 @@ export async function POST(req: Request) {
   }
 
   // The signup trigger created the profile; tune it for the invite.
+  // The invited user already has a working account + temp password, so mark
+  // them active immediately — otherwise they'd be blocked by the "Account is
+  // not active" guard in /api/generate with no way to ever activate.
   const { data: profile } = await g.admin
     .from("profiles")
     .update({
       name: name ?? null,
       credit_limit: credit_limit ?? null,
-      status: "invited",
+      status: "active",
     })
     .eq("id", created.user.id)
     .select("*")
