@@ -31,6 +31,7 @@ export function ClientChrome({
   const titles: Record<string, string> = {
     "/dashboard": "Dashboard",
     "/history": "Generation history",
+    "/account": "Account settings",
   };
   functions.forEach((f) => (titles[`/fn/${f.key}`] = f.title));
   const title = titles[pathname] ?? "CreativeFlow AI";
@@ -91,6 +92,13 @@ export function ClientChrome({
             <div className="nav-label">Records</div>
             <Link className={`nav-item${navActive("/history")}`} href="/history">
               <i className="ti ti-history" /> History
+            </Link>
+          </div>
+
+          <div className="nav-section">
+            <div className="nav-label">Settings</div>
+            <Link className={`nav-item${navActive("/account")}`} href="/account">
+              <i className="ti ti-key" /> Account
             </Link>
           </div>
 
